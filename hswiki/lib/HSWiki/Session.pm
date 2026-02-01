@@ -1,0 +1,183 @@
+package HSWiki::Session;
+
+use strict;
+use warnings;
+
+use Digest::SHA qw(sha256_hex hmac_sha256_hex);
+use MIME::Base64 qw(encode_base64url decode_base64url);
+use HSWiki::Config;
+
+our $VERSION = '0.01';
+
+# In-memory session store (keyed by session_id)
+my %SESSION_STORE;
+
+# Session secret from config
+my $SECRET;
+
+sub _get_secret {
+    $SECRET //= HSWiki::Config->session->{secret};
+    return $SECRET;
+}
+
+# Generate a session ID
+sub generate_id {
+    my ($class) = @_;
+
+    my $bytes;
+    if (-r '/dev/urandom') {
+        open my $fh, '<:raw', '/dev/urandom' or die "Cannot open /dev/urandom: $!";
+        read($fh, $bytes, 16);
+        close $fh;
+    } else {
+        $bytes = pack('C*', map { int(rand(256)) } 1..16);
+    }
+
+    return unpack('H*', $bytes);
+}
+
+# Sign a session ID
+sub sign {
+    my ($class, $session_id) = @_;
+    my $sig = substr(hmac_sha256_hex($session_id, $class->_get_secret), 0, 16);
+    return "$session_id.$sig";
+}
+
+# Verify and extract session ID from signed cookie
+sub verify {
+    my ($class, $signed_cookie) = @_;
+
+    return unless $signed_cookie && $signed_cookie =~ /^([a-f0-9]{32})\.([a-f0-9]{16})$/;
+
+    my ($session_id, $sig) = ($1, $2);
+    my $expected = substr(hmac_sha256_hex($session_id, $class->_get_secret), 0, 16);
+
+    # Constant-time comparison
+    return unless length($sig) == length($expected);
+    my $diff = 0;
+    $diff |= ord(substr($sig, $_, 1)) ^ ord(substr($expected, $_, 1)) for 0 .. length($sig) - 1;
+
+    return $diff == 0 ? $session_id : undef;
+}
+
+# Get session data for a request
+sub get {
+    my ($class, $req) = @_;
+
+    # Check for session cookie
+    my $config = HSWiki::Config->session;
+    my $signed_cookie = $req->cookie($config->{cookie_name});
+
+    if ($signed_cookie) {
+        my $session_id = $class->verify($signed_cookie);
+        if ($session_id && exists $SESSION_STORE{$session_id}) {
+            return ($session_id, $SESSION_STORE{$session_id});
+        }
+    }
+
+    return (undef, {});
+}
+
+# Get or create session
+sub get_or_create {
+    my ($class, $req) = @_;
+
+    my ($session_id, $data) = $class->get($req);
+
+    unless ($session_id) {
+        $session_id = $class->generate_id;
+        $data = { _created => time() };
+        $SESSION_STORE{$session_id} = $data;
+    }
+
+    return ($session_id, $data);
+}
+
+# Set session data
+sub set {
+    my ($class, $session_id, $key, $value) = @_;
+
+    $SESSION_STORE{$session_id} //= {};
+    $SESSION_STORE{$session_id}{$key} = $value;
+}
+
+# Get session value
+sub get_value {
+    my ($class, $session_id, $key) = @_;
+
+    return unless $session_id && exists $SESSION_STORE{$session_id};
+    return $SESSION_STORE{$session_id}{$key};
+}
+
+# Clear session
+sub clear {
+    my ($class, $session_id) = @_;
+    delete $SESSION_STORE{$session_id} if $session_id;
+}
+
+# Add session cookie to response
+sub set_cookie {
+    my ($class, $res, $session_id) = @_;
+
+    my $config = HSWiki::Config->session;
+    my $signed = $class->sign($session_id);
+
+    $res->cookie($config->{cookie_name}, $signed,
+        path     => '/',
+        max_age  => $config->{max_age},
+        httponly => $config->{httponly},
+        secure   => $config->{secure},
+        samesite => $config->{samesite},
+    );
+}
+
+# Clear session cookie from response
+sub clear_cookie {
+    my ($class, $res) = @_;
+
+    my $config = HSWiki::Config->session;
+    $res->cookie($config->{cookie_name}, '',
+        path    => '/',
+        max_age => 0,
+    );
+}
+
+1;
+
+__END__
+
+=head1 NAME
+
+HSWiki::Session - Custom session management for HSWiki
+
+=head1 DESCRIPTION
+
+This module provides session management that works without Hypersonic's
+built-in session_config (which has a bug where after_middleware doesn't
+receive the response object).
+
+=head1 USAGE
+
+    use HSWiki::Session;
+
+    # In a handler
+    sub my_handler {
+        my ($req) = @_;
+
+        # Get or create session
+        my ($session_id, $data) = HSWiki::Session->get_or_create($req);
+
+        # Set session values
+        HSWiki::Session->set($session_id, 'user_id', 123);
+
+        # Get session values
+        my $user_id = HSWiki::Session->get_value($session_id, 'user_id');
+
+        # Build response and add session cookie
+        my $res = res->json({ success => 1 });
+        HSWiki::Session->set_cookie($res, $session_id);
+
+        return $res;
+    }
+
+=cut

@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HSWiki</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <header>
+        <nav>
+            <div class="nav-brand">
+                <a href="#" onclick="app.showSpaces()">HSWiki</a>
+            </div>
+            <div class="nav-links">
+                <span id="nav-user" style="display:none;">
+                    <span id="username-display"></span>
+                    <a href="#" onclick="app.logout()">Logout</a>
+                </span>
+                <span id="nav-guest">
+                    <a href="#" onclick="app.showLogin()">Login</a>
+                    <a href="#" onclick="app.showRegister()">Register</a>
+                </span>
+            </div>
+        </nav>
+    </header>
+
+    <main>
+        <!-- Login Form -->
+        <section id="login-section" class="auth-section" style="display:none;">
+            <h2>Login</h2>
+            <form id="login-form" onsubmit="return app.login(event)">
+                <div class="form-group">
+                    <label for="login-username">Username</label>
+                    <input type="text" id="login-username" required>
+                </div>
+                <div class="form-group">
+                    <label for="login-password">Password</label>
+                    <input type="password" id="login-password" required>
+                </div>
+                <button type="submit" class="btn btn-primary">Login</button>
+                <p class="form-footer">Don't have an account? <a href="#" onclick="app.showRegister()">Register</a></p>
+            </form>
+        </section>
+
+        <!-- Register Form -->
+        <section id="register-section" class="auth-section" style="display:none;">
+            <h2>Register</h2>
+            <form id="register-form" onsubmit="return app.register(event)">
+                <div class="form-group">
+                    <label for="reg-username">Username</label>
+                    <input type="text" id="reg-username" required minlength="3" maxlength="32">
+                </div>
+                <div class="form-group">
+                    <label for="reg-email">Email</label>
+                    <input type="email" id="reg-email" required>
+                </div>
+                <div class="form-group">
+                    <label for="reg-password">Password</label>
+                    <input type="password" id="reg-password" required minlength="8">
+                </div>
+                <button type="submit" class="btn btn-primary">Register</button>
+                <p class="form-footer">Already have an account? <a href="#" onclick="app.showLogin()">Login</a></p>
+            </form>
+        </section>
+
+        <!-- Spaces List -->
+        <section id="spaces-section" style="display:none;">
+            <div class="section-header">
+                <h2>Spaces</h2>
+                <button class="btn btn-primary" onclick="app.showCreateSpace()" id="create-space-btn" style="display:none;">Create Space</button>
+            </div>
+            <div id="spaces-list" class="card-list"></div>
+        </section>
+
+        <!-- Create Space Form -->
+        <section id="create-space-section" style="display:none;">
+            <h2>Create Space</h2>
+            <form id="create-space-form" onsubmit="return app.createSpace(event)">
+                <div class="form-group">
+                    <label for="space-name">Name</label>
+                    <input type="text" id="space-name" required>
+                </div>
+                <div class="form-group">
+                    <label for="space-description">Description</label>
+                    <textarea id="space-description" rows="3"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="space-public"> Public space
+                    </label>
+                </div>
+                <button type="submit" class="btn btn-primary">Create</button>
+                <button type="button" class="btn" onclick="app.showSpaces()">Cancel</button>
+            </form>
+        </section>
+
+        <!-- Space View / Pages List -->
+        <section id="space-section" style="display:none;">
+            <div class="breadcrumb">
+                <a href="#" onclick="app.showSpaces()">Spaces</a> &gt; <span id="space-name-breadcrumb"></span>
+            </div>
+            <div class="section-header">
+                <h2 id="space-title"></h2>
+                <button class="btn btn-primary" onclick="app.showCreatePage()" id="create-page-btn" style="display:none;">Create Page</button>
+            </div>
+            <p id="space-description-text"></p>
+            <div id="pages-list" class="card-list"></div>
+        </section>
+
+        <!-- Create/Edit Page Form -->
+        <section id="edit-page-section" style="display:none;">
+            <div class="breadcrumb">
+                <a href="#" onclick="app.showSpaces()">Spaces</a> &gt;
+                <a href="#" onclick="app.showSpace(app.currentSpace)" id="edit-space-breadcrumb"></a> &gt;
+                <span id="edit-page-breadcrumb">New Page</span>
+            </div>
+            <h2 id="edit-page-title">Create Page</h2>
+            <form id="edit-page-form" onsubmit="return app.savePage(event)">
+                <div class="form-group">
+                    <label for="page-title">Title</label>
+                    <input type="text" id="page-title" required>
+                </div>
+                <div class="form-group">
+                    <label for="page-content">Content (Wiki Markup)</label>
+                    <textarea id="page-content" rows="15"></textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Save</button>
+                    <button type="button" class="btn" onclick="app.previewPage()">Preview</button>
+                    <button type="button" class="btn" onclick="app.cancelEdit()">Cancel</button>
+                </div>
+            </form>
+            <div id="preview-area" style="display:none;">
+                <h3>Preview</h3>
+                <div id="preview-content" class="wiki-content"></div>
+            </div>
+        </section>
+
+        <!-- Page View -->
+        <section id="page-section" style="display:none;">
+            <div class="breadcrumb">
+                <a href="#" onclick="app.showSpaces()">Spaces</a> &gt;
+                <a href="#" onclick="app.showSpace(app.currentSpace)" id="page-space-breadcrumb"></a> &gt;
+                <span id="page-title-breadcrumb"></span>
+            </div>
+            <div class="section-header">
+                <h2 id="page-title-display"></h2>
+                <div class="page-actions" id="page-actions" style="display:none;">
+                    <button class="btn" onclick="app.editPage()">Edit</button>
+                    <button class="btn" onclick="app.showVersions()">History</button>
+                </div>
+            </div>
+            <div class="page-meta">
+                <span>Version: <span id="page-version"></span></span>
+                <span>Updated: <span id="page-updated"></span></span>
+            </div>
+            <div id="page-content-display" class="wiki-content"></div>
+        </section>
+
+        <!-- Page Versions -->
+        <section id="versions-section" style="display:none;">
+            <div class="breadcrumb">
+                <a href="#" onclick="app.showSpaces()">Spaces</a> &gt;
+                <a href="#" onclick="app.showSpace(app.currentSpace)" id="versions-space-breadcrumb"></a> &gt;
+                <a href="#" onclick="app.showPage(app.currentPage)" id="versions-page-breadcrumb"></a> &gt;
+                History
+            </div>
+            <h2>Page History</h2>
+            <div id="versions-list" class="versions-list"></div>
+        </section>
+
+        <!-- Loading/Error -->
+        <div id="loading" style="display:none;">Loading...</div>
+        <div id="error-message" class="error-message" style="display:none;"></div>
+        <div id="success-message" class="success-message" style="display:none;"></div>
+    </main>
+
+    <footer>
+        <p>HSWiki - Powered by Hypersonic</p>
+    </footer>
+
+    <script src="js/app.js"></script>
+</body>
+</html>
