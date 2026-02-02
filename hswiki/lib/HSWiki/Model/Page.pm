@@ -22,10 +22,10 @@ sub create {
     # Generate slug from title if not provided
     my $slug = $args{slug} // HSWiki::Wiki->slugify($args{title});
 
-    # Render content to HTML
+    # Render content to HTML with space context for link resolution
     my $content_html = HSWiki::Wiki->render_safe(
         $args{content},
-        base_url => "/api/spaces/$args{space_key}/pages"
+        space_id => $args{space_id},
     );
 
     my $page = {
@@ -115,9 +115,9 @@ sub update {
 
     my $new_version = ($current->{version} // 0) + 1;
 
-    # Re-render content if changed
+    # Re-render content if changed (with space context for link resolution)
     my $content = $updates{content} // $current->{content};
-    my $content_html = HSWiki::Wiki->render_safe($content, base_url => "/api/spaces/$space_id/pages");
+    my $content_html = HSWiki::Wiki->render_safe($content, space_id => $space_id);
 
     # Update main page
     HSWiki::DB->update('pages', {
@@ -285,7 +285,11 @@ sub to_response {
         $response->{content} = $page->{content};
     }
     if ($opts{include_html}) {
-        $response->{content_html} = $page->{content_html};
+        # Re-render content to resolve wiki links with current page titles
+        $response->{content_html} = HSWiki::Wiki->render_safe(
+            $page->{content},
+            space_id => $page->{space_id},
+        );
     }
 
     return $response;

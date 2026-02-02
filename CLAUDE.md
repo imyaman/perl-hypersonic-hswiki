@@ -36,3 +36,17 @@
      - `hswiki-web/css/style.css` → `https://hswiki.sys5.co/css/style.css`
      - `hswiki-web/js/app.js` → `https://hswiki.sys5.co/js/app.js`
    - API calls use relative paths (`/api/*`) so frontend works in both local and production
+
+8. URL Routing (SPA)
+   - Every page has a unique, permanent, bookmarkable URL
+   - URL structure:
+     - `/` – Spaces list (home)
+     - `/login` – Login page
+     - `/register` – Register page
+     - `/:space_key` – Space detail (list of pages)
+     - `/:space_key/new` – Create new page
+     - `/:space_key/:slug` – View page
+     - `/:space_key/:slug/edit` – Edit page
+     - `/:space_key/:slug/versions` – Version history
+   - Web server must serve `index.html` for all routes (SPA fallback)
+   - Browser back/forward navigation supported via History API

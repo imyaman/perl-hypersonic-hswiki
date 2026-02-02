@@ -324,6 +324,17 @@ section {
     color: #3498db;
 }
 
+/* Wiki links to missing pages - shown in red */
+.wiki-content a.wiki-link-missing {
+    color: #c0392b;
+    text-decoration: underline dotted;
+}
+
+.wiki-content a.wiki-link-missing:hover {
+    color: #e74c3c;
+    cursor: pointer;
+}
+
 .wiki-content strong {
     font-weight: 600;
 }

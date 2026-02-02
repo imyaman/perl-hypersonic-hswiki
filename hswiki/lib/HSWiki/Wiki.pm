@@ -9,18 +9,25 @@ use HTML::Entities qw(encode_entities);
 
 our $VERSION = '0.01';
 
+# Current space_id for link resolution (set during render)
+my $_current_space_id;
+
 # Render wiki markup to HTML
 sub render {
     my ($class, $content, %opts) = @_;
 
     return '' unless defined $content;
 
+    # Store space_id for link resolution
+    $_current_space_id = $opts{space_id};
+
     # Pre-process custom syntax before Text::WikiFormat
     $content = _preprocess($content, %opts);
 
-    # Render with Text::WikiFormat using default settings
+    # Render with Text::WikiFormat
+    # Disable extended links - we handle [[Page]] ourselves in postprocess
     my $html = Text::WikiFormat::format($content, {}, {
-        extended       => 1,
+        extended       => 0,
         implicit_links => 0,
         absolute_links => 1,
     });
@@ -31,9 +38,15 @@ sub render {
     return $html;
 }
 
+# Placeholder for wiki links during Text::WikiFormat processing
+my @_wiki_links;
+
 # Pre-process custom wiki syntax
 sub _preprocess {
     my ($content, %opts) = @_;
+
+    # Reset wiki links array
+    @_wiki_links = ();
 
     # Convert ```code``` blocks to wiki code format
     $content =~ s/```(\w*)\n(.*?)```/_format_code_block($1, $2)/ges;
@@ -53,21 +66,53 @@ sub _preprocess {
     # Convert 1. numbered lists to wiki format
     $content =~ s/^\d+\.\s+(.+)$/# $1/gm;
 
-    # Convert wiki links [[Page]] to regular links
-    if ($opts{base_url}) {
-        $content =~ s/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/_format_link($1, $2, $opts{base_url})/ge;
-    }
+    # Replace wiki links [[Page]] or [[Page|Text]] with placeholders
+    # to prevent Text::WikiFormat from processing them
+    $content =~ s/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/_store_wiki_link($1, $2)/ge;
 
     return $content;
 }
 
-# Format wiki link
+# Store wiki link and return placeholder
+sub _store_wiki_link {
+    my ($target, $text) = @_;
+    my $index = scalar @_wiki_links;
+    push @_wiki_links, { target => $target, text => $text };
+    return "WIKILINK_PLACEHOLDER_${index}_END";
+}
+
+# Format wiki link with page title resolution
 sub _format_link {
-    my ($target, $text, $base_url) = @_;
-    $text //= $target;
+    my ($target, $text) = @_;
     my $slug = _slugify($target);
-    $base_url //= '';
-    return qq{<a href="$base_url/$slug">$text</a>};
+    my $css_class = 'wiki-link';
+    my $display_text;
+
+    # If custom text provided, always use it
+    if (defined $text && $text ne '') {
+        $display_text = $text;
+    }
+    # Otherwise, try to resolve page title from database
+    elsif ($_current_space_id) {
+        require HSWiki::Model::Page;
+        my $page = HSWiki::Model::Page->find_by_slug($_current_space_id, $slug);
+        if ($page) {
+            $display_text = $page->{title};
+        } else {
+            # Page doesn't exist - use original text and mark as missing
+            $display_text = $target;
+            $css_class = 'wiki-link wiki-link-missing';
+        }
+    }
+    else {
+        # No space context - use original text
+        $display_text = $target;
+    }
+
+    # Generate link with data-slug for JavaScript navigation
+    my $escaped_text = encode_entities($display_text);
+    my $escaped_slug = encode_entities($slug);
+    return qq{<a href="#" class="$css_class" data-slug="$escaped_slug">$escaped_text</a>};
 }
 
 # Format code block
@@ -90,10 +135,21 @@ sub _format_header {
 sub _postprocess {
     my ($html, %opts) = @_;
 
+    # Restore wiki link placeholders with actual HTML links
+    $html =~ s/WIKILINK_PLACEHOLDER_(\d+)_END/_restore_wiki_link($1)/ge;
+
     # Auto-link URLs (but not already linked ones)
     $html =~ s{(?<![">])(https?://[^\s<>"]+)}{<a href="$1" rel="nofollow">$1</a>}g;
 
     return $html;
+}
+
+# Restore wiki link from placeholder
+sub _restore_wiki_link {
+    my ($index) = @_;
+    return '' unless defined $_wiki_links[$index];
+    my $link = $_wiki_links[$index];
+    return _format_link($link->{target}, $link->{text});
 }
 
 # Convert text to URL-safe slug

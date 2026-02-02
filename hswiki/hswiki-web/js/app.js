@@ -10,7 +10,83 @@ const app = {
 
     // Initialize
     init() {
-        this.checkAuth();
+        this.checkAuth().then(() => {
+            // Handle initial route based on URL
+            this.handleRoute();
+        });
+
+        // Handle browser back/forward
+        window.addEventListener('popstate', () => this.handleRoute());
+    },
+
+    // URL Routing
+    navigate(path, pushState = true) {
+        if (pushState) {
+            history.pushState(null, '', path);
+        }
+        this.handleRoute();
+    },
+
+    handleRoute() {
+        const path = window.location.pathname;
+        const parts = path.split('/').filter(p => p);
+
+        // Route: / - Spaces list
+        if (parts.length === 0) {
+            this.showSpaces(false);
+            return;
+        }
+
+        // Route: /login
+        if (parts[0] === 'login') {
+            this.showLogin(false);
+            return;
+        }
+
+        // Route: /register
+        if (parts[0] === 'register') {
+            this.showRegister(false);
+            return;
+        }
+
+        // Route: /:space_key
+        if (parts.length === 1) {
+            this.showSpace(parts[0], false);
+            return;
+        }
+
+        // Route: /:space_key/new - Create page
+        if (parts.length === 2 && parts[1] === 'new') {
+            this.currentSpace = parts[0];
+            this.showCreatePage(null, false);
+            return;
+        }
+
+        // Route: /:space_key/:slug
+        if (parts.length === 2) {
+            this.currentSpace = parts[0];
+            this.showPage(parts[1], false);
+            return;
+        }
+
+        // Route: /:space_key/:slug/edit
+        if (parts.length === 3 && parts[2] === 'edit') {
+            this.currentSpace = parts[0];
+            this.currentPage = parts[1];
+            this.editPageByUrl();
+            return;
+        }
+
+        // Route: /:space_key/:slug/versions
+        if (parts.length === 3 && parts[2] === 'versions') {
+            this.currentSpace = parts[0];
+            this.currentPage = parts[1];
+            this.showVersions(false);
+            return;
+        }
+
+        // Default: show spaces
+        this.showSpaces(false);
     },
 
     // API Helper
@@ -96,22 +172,26 @@ const app = {
             const data = await this.api('/auth/me');
             this.currentUser = data.user;
             this.updateNav();
-            this.showSpaces();
         } catch (error) {
             this.currentUser = null;
             this.updateNav();
-            this.showSpaces();
         }
     },
 
-    showLogin() {
-        this.showSection('login-section');
-        document.getElementById('login-form').reset();
+    showLogin(updateUrl = true) {
+        if (updateUrl) this.navigate('/login', true);
+        else {
+            this.showSection('login-section');
+            document.getElementById('login-form').reset();
+        }
     },
 
-    showRegister() {
-        this.showSection('register-section');
-        document.getElementById('register-form').reset();
+    showRegister(updateUrl = true) {
+        if (updateUrl) this.navigate('/register', true);
+        else {
+            this.showSection('register-section');
+            document.getElementById('register-form').reset();
+        }
     },
 
     async login(event) {
@@ -129,7 +209,7 @@ const app = {
             this.currentUser = data.user;
             this.updateNav();
             this.showSuccess('Login successful!');
-            this.showSpaces();
+            this.navigate('/');
         } catch (error) {
             this.showError(error.message);
         }
@@ -153,7 +233,7 @@ const app = {
             this.currentUser = data.user;
             this.updateNav();
             this.showSuccess('Registration successful!');
-            this.showSpaces();
+            this.navigate('/');
         } catch (error) {
             this.showError(error.message);
         }
@@ -170,11 +250,18 @@ const app = {
 
         this.currentUser = null;
         this.updateNav();
-        this.showSpaces();
+        this.navigate('/');
     },
 
     // Spaces
-    async showSpaces() {
+    async showSpaces(updateUrl = true) {
+        if (updateUrl) {
+            this.navigate('/', true);
+            return;
+        }
+
+        this.currentSpace = null;
+        this.currentPage = null;
         this.showSection('spaces-section');
         this.showLoading(true);
 
@@ -206,7 +293,7 @@ const app = {
 
         container.innerHTML = spaces.map(space => `
             <div class="card">
-                <h3><a href="#" onclick="app.showSpace('${space.space_key}')">${this.escapeHtml(space.name)}</a></h3>
+                <h3><a href="/${space.space_key}">${this.escapeHtml(space.name)}</a></h3>
                 <p>${this.escapeHtml(space.description || '')}</p>
                 <div class="card-meta">
                     ${space.is_public ? 'Public' : 'Private'}
@@ -238,7 +325,7 @@ const app = {
             });
 
             this.showSuccess('Space created!');
-            this.showSpace(data.space.space_key);
+            this.navigate(`/${data.space.space_key}`);
         } catch (error) {
             this.showError(error.message);
         }
@@ -246,8 +333,14 @@ const app = {
         return false;
     },
 
-    async showSpace(spaceKey) {
+    async showSpace(spaceKey, updateUrl = true) {
+        if (updateUrl) {
+            this.navigate(`/${spaceKey}`, true);
+            return;
+        }
+
         this.currentSpace = spaceKey;
+        this.currentPage = null;
         this.showSection('space-section');
         this.showLoading(true);
 
@@ -285,7 +378,7 @@ const app = {
 
         container.innerHTML = pages.map(page => `
             <div class="card">
-                <h3><a href="#" onclick="app.showPage('${page.slug}')">${this.escapeHtml(page.title)}</a></h3>
+                <h3><a href="/${this.currentSpace}/${page.slug}">${this.escapeHtml(page.title)}</a></h3>
                 <div class="card-meta">
                     Version ${page.version} &bull; Updated ${this.formatDate(page.updated_at)}
                 </div>
@@ -294,9 +387,14 @@ const app = {
     },
 
     // Pages
-    showCreatePage() {
+    showCreatePage(prefillTitle = null, updateUrl = true) {
         if (!this.currentUser) {
             this.showLogin();
+            return;
+        }
+
+        if (updateUrl) {
+            this.navigate(`/${this.currentSpace}/new`, true);
             return;
         }
 
@@ -308,9 +406,19 @@ const app = {
         document.getElementById('edit-page-title').textContent = 'Create Page';
         document.getElementById('edit-page-form').reset();
         document.getElementById('preview-area').style.display = 'none';
+
+        // Pre-fill title if provided (e.g., from clicking a missing wiki link)
+        if (prefillTitle) {
+            document.getElementById('page-title').value = prefillTitle;
+        }
     },
 
-    async showPage(slug) {
+    async showPage(slug, updateUrl = true) {
+        if (updateUrl) {
+            this.navigate(`/${this.currentSpace}/${slug}`, true);
+            return;
+        }
+
         this.currentPage = slug;
         this.showSection('page-section');
         this.showLoading(true);
@@ -335,12 +443,15 @@ const app = {
         }
     },
 
-    async editPage() {
+    editPage() {
         if (!this.currentUser) {
             this.showLogin();
             return;
         }
+        this.navigate(`/${this.currentSpace}/${this.currentPage}/edit`);
+    },
 
+    async editPageByUrl() {
         this.showLoading(true);
 
         try {
@@ -377,7 +488,7 @@ const app = {
                     body: { title, content }
                 });
                 this.showSuccess('Page updated!');
-                this.showPage(this.editingPage.slug);
+                this.navigate(`/${this.currentSpace}/${this.editingPage.slug}`);
             } else {
                 // Create new page
                 const data = await this.api(`/pages/create/${this.currentSpace}`, {
@@ -385,7 +496,7 @@ const app = {
                     body: { title, content }
                 });
                 this.showSuccess('Page created!');
-                this.showPage(data.page.slug);
+                this.navigate(`/${this.currentSpace}/${data.page.slug}`);
             }
         } catch (error) {
             this.showError(error.message);
@@ -413,14 +524,19 @@ const app = {
 
     cancelEdit() {
         if (this.editingPage) {
-            this.showPage(this.editingPage.slug);
+            this.navigate(`/${this.currentSpace}/${this.editingPage.slug}`);
         } else {
-            this.showSpace(this.currentSpace);
+            this.navigate(`/${this.currentSpace}`);
         }
     },
 
     // Versions
-    async showVersions() {
+    async showVersions(updateUrl = true) {
+        if (updateUrl) {
+            this.navigate(`/${this.currentSpace}/${this.currentPage}/versions`, true);
+            return;
+        }
+
         this.showSection('versions-section');
         this.showLoading(true);
 
@@ -486,4 +602,36 @@ const app = {
 };
 
 // Initialize on load
-document.addEventListener('DOMContentLoaded', () => app.init());
+document.addEventListener('DOMContentLoaded', () => {
+    app.init();
+
+    // Handle all link clicks for SPA navigation
+    document.addEventListener('click', (e) => {
+        const link = e.target.closest('a');
+        if (!link) return;
+
+        // Handle wiki links (missing pages go to create)
+        if (link.classList.contains('wiki-link')) {
+            e.preventDefault();
+            if (link.classList.contains('wiki-link-missing')) {
+                const suggestedTitle = link.textContent;
+                // Navigate to create page with title in URL
+                app.navigate(`/${app.currentSpace}/new`);
+                // Set title after navigation
+                setTimeout(() => {
+                    document.getElementById('page-title').value = suggestedTitle;
+                }, 100);
+            } else {
+                app.navigate(`/${app.currentSpace}/${link.dataset.slug}`);
+            }
+            return;
+        }
+
+        // Handle internal links (same origin, not external)
+        const href = link.getAttribute('href');
+        if (href && href.startsWith('/') && !href.startsWith('//')) {
+            e.preventDefault();
+            app.navigate(href);
+        }
+    });
+});
