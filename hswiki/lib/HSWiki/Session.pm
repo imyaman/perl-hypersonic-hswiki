@@ -5,12 +5,13 @@ use warnings;
 
 use Digest::SHA qw(sha256_hex hmac_sha256_hex);
 use MIME::Base64 qw(encode_base64url decode_base64url);
+use Cpanel::JSON::XS qw(encode_json decode_json);
 use HSWiki::Config;
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
-# In-memory session store (keyed by session_id)
-my %SESSION_STORE;
+# Redis connection
+my $REDIS;
 
 # Session secret from config
 my $SECRET;
@@ -18,6 +19,29 @@ my $SECRET;
 sub _get_secret {
     $SECRET //= HSWiki::Config->session->{secret};
     return $SECRET;
+}
+
+# Get Redis connection
+sub _redis {
+    my ($class) = @_;
+
+    unless ($REDIS) {
+        require Redis;
+        my $config = HSWiki::Config->redis;
+        $REDIS = Redis->new(
+            server    => $config->{server},
+            reconnect => 60,
+            every     => 1000,
+        );
+    }
+
+    return $REDIS;
+}
+
+# Session key prefix
+sub _session_key {
+    my ($class, $session_id) = @_;
+    return "hswiki:session:$session_id";
 }
 
 # Generate a session ID
@@ -70,8 +94,13 @@ sub get {
 
     if ($signed_cookie) {
         my $session_id = $class->verify($signed_cookie);
-        if ($session_id && exists $SESSION_STORE{$session_id}) {
-            return ($session_id, $SESSION_STORE{$session_id});
+        if ($session_id) {
+            my $redis = $class->_redis;
+            my $json = $redis->get($class->_session_key($session_id));
+            if ($json) {
+                my $data = eval { decode_json($json) } || {};
+                return ($session_id, $data);
+            }
         }
     }
 
@@ -87,32 +116,65 @@ sub get_or_create {
     unless ($session_id) {
         $session_id = $class->generate_id;
         $data = { _created => time() };
-        $SESSION_STORE{$session_id} = $data;
+        $class->_save($session_id, $data);
     }
 
     return ($session_id, $data);
+}
+
+# Save session data to Redis
+sub _save {
+    my ($class, $session_id, $data) = @_;
+
+    my $config = HSWiki::Config->session;
+    my $ttl = $config->{max_age} || 86400;
+    my $redis = $class->_redis;
+
+    $redis->setex(
+        $class->_session_key($session_id),
+        $ttl,
+        encode_json($data)
+    );
 }
 
 # Set session data
 sub set {
     my ($class, $session_id, $key, $value) = @_;
 
-    $SESSION_STORE{$session_id} //= {};
-    $SESSION_STORE{$session_id}{$key} = $value;
+    my $redis = $class->_redis;
+    my $session_key = $class->_session_key($session_id);
+
+    # Get current data
+    my $json = $redis->get($session_key);
+    my $data = $json ? (eval { decode_json($json) } || {}) : {};
+
+    # Update and save
+    $data->{$key} = $value;
+    $class->_save($session_id, $data);
 }
 
 # Get session value
 sub get_value {
     my ($class, $session_id, $key) = @_;
 
-    return unless $session_id && exists $SESSION_STORE{$session_id};
-    return $SESSION_STORE{$session_id}{$key};
+    return unless $session_id;
+
+    my $redis = $class->_redis;
+    my $json = $redis->get($class->_session_key($session_id));
+    return unless $json;
+
+    my $data = eval { decode_json($json) } || {};
+    return $data->{$key};
 }
 
 # Clear session
 sub clear {
     my ($class, $session_id) = @_;
-    delete $SESSION_STORE{$session_id} if $session_id;
+
+    return unless $session_id;
+
+    my $redis = $class->_redis;
+    $redis->del($class->_session_key($session_id));
 }
 
 # Add session cookie to response
@@ -148,13 +210,12 @@ __END__
 
 =head1 NAME
 
-HSWiki::Session - Custom session management for HSWiki
+HSWiki::Session - Redis-based session management for HSWiki
 
 =head1 DESCRIPTION
 
-This module provides session management that works without Hypersonic's
-built-in session_config (which has a bug where after_middleware doesn't
-receive the response object).
+This module provides session management using Redis (or Valkey) as the
+backend storage. Sessions are shared across all Hypersonic workers.
 
 =head1 USAGE
 
@@ -179,5 +240,9 @@ receive the response object).
 
         return $res;
     }
+
+=head1 REDIS KEYS
+
+Sessions are stored with the key pattern: C<hswiki:session:{session_id}>
 
 =cut
